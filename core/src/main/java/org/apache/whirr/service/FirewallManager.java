@@ -32,6 +32,12 @@ import org.apache.whirr.Cluster;
 import org.apache.whirr.Cluster.Instance;
 import org.apache.whirr.ClusterSpec;
 import org.jclouds.aws.util.AWSUtils;
+import org.jclouds.cloudstack.CloudStackApiMetadata;
+import org.jclouds.cloudstack.CloudStackClient;
+import org.jclouds.cloudstack.domain.AsyncCreateResponse;
+import org.jclouds.cloudstack.domain.FirewallRule;
+import org.jclouds.cloudstack.options.CreateFirewallRuleOptions;
+import org.jclouds.cloudstack.strategy.BlockUntilJobCompletesAndReturnResult;
 import org.jclouds.compute.ComputeServiceContext;
 import org.jclouds.ec2.EC2ApiMetadata;
 import org.jclouds.ec2.EC2Client;
@@ -48,6 +54,8 @@ import org.slf4j.LoggerFactory;
 import com.google.common.base.Function;
 import com.google.common.base.Optional;
 import com.google.common.base.Predicate;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.ImmutableSet.Builder;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
@@ -342,6 +350,31 @@ public class FirewallManager {
       } else {
         LOG.warn("OpenStack security group extension not available for this cloud.");
       }
-    }
+    } else if (CloudStackApiMetadata.CONTEXT_TOKEN.isAssignableFrom(computeServiceContext.getBackendType())) {
+      CloudStackClient csClient = computeServiceContext.unwrap(CloudStackApiMetadata.CONTEXT_TOKEN).getApi();
+      BlockUntilJobCompletesAndReturnResult blockTask = computeServiceContext.utils().injector().getInstance(BlockUntilJobCompletesAndReturnResult.class);
+      Builder<AsyncCreateResponse> responses = ImmutableSet.builder();
+
+      
+      if (ports.length > 0) {
+        for (Instance instance : instances) {
+          String publicIPId = csClient.getVirtualMachineClient().getVirtualMachine(instance.getId()).getPublicIPId();
+          
+          for (int port : ports) {
+            AsyncCreateResponse response = csClient.getFirewallClient().createFirewallRuleForIpAndProtocol(publicIPId, FirewallRule.Protocol.TCP,
+                                                                                                           CreateFirewallRuleOptions.Builder
+                                                                                                           .startPort(port)
+                                                                                                           .endPort(port)
+                                                                                                           .CIDRs(ImmutableSet.copyOf(cidrs))
+                                                                                                           );
+            responses.add(response);
+          }
+        } 
+
+        for (AsyncCreateResponse response : responses.build()) {
+          FirewallRule rule = blockTask.<FirewallRule> apply(response);
+        }
+      }
+    }        
   }
 }
