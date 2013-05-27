@@ -19,6 +19,7 @@
 package org.apache.whirr.service;
 
 import static org.jclouds.scriptbuilder.domain.Statements.exec;
+import static org.jclouds.util.Predicates2.retry;
 
 import java.io.IOException;
 import java.net.HttpURLConnection;
@@ -26,21 +27,35 @@ import java.net.URL;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.io.IOUtils;
 import org.apache.whirr.Cluster;
 import org.apache.whirr.Cluster.Instance;
 import org.apache.whirr.ClusterSpec;
 import org.jclouds.aws.util.AWSUtils;
+import org.jclouds.cloudstack.CloudStackApiMetadata;
+import org.jclouds.cloudstack.CloudStackClient;
+import org.jclouds.cloudstack.domain.AsyncCreateResponse;
+import org.jclouds.cloudstack.domain.FirewallRule;
+import org.jclouds.cloudstack.domain.IngressRule;
+import org.jclouds.cloudstack.domain.NetworkType;
+import org.jclouds.cloudstack.domain.Zone;
+import org.jclouds.cloudstack.options.CreateFirewallRuleOptions;
+import org.jclouds.cloudstack.options.ListSecurityGroupsOptions;
+import org.jclouds.cloudstack.predicates.JobComplete;
+import org.jclouds.cloudstack.strategy.BlockUntilJobCompletesAndReturnResult;
+import org.jclouds.cloudstack.suppliers.ZoneIdToZoneSupplier;
 import org.jclouds.compute.ComputeServiceContext;
 import org.jclouds.ec2.EC2ApiMetadata;
 import org.jclouds.ec2.EC2Client;
 import org.jclouds.ec2.domain.IpProtocol;
+import org.jclouds.javax.annotation.Nullable;
 import org.jclouds.openstack.nova.v2_0.NovaApiMetadata;
 import org.jclouds.openstack.nova.v2_0.domain.Ingress;
 import org.jclouds.openstack.nova.v2_0.domain.SecurityGroup;
 import org.jclouds.openstack.nova.v2_0.extensions.SecurityGroupApi;
-import org.jclouds.javax.annotation.Nullable;
 import org.jclouds.scriptbuilder.domain.Statement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,6 +63,9 @@ import org.slf4j.LoggerFactory;
 import com.google.common.base.Function;
 import com.google.common.base.Optional;
 import com.google.common.base.Predicate;
+import com.google.common.base.Throwables;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.ImmutableSet.Builder;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
@@ -290,7 +308,7 @@ public class FirewallManager {
       // Until then we need this temporary workaround.
       String region = AWSUtils.parseHandle(Iterables.get(instances, 0).getId())[0];
       EC2Client ec2Client = computeServiceContext.unwrap(EC2ApiMetadata.CONTEXT_TOKEN).getApi();
-      String groupName = "jclouds#" + clusterSpec.getClusterName();
+      String groupName = "whirr#" + clusterSpec.getClusterName();
       for (String cidr : cidrs) {
         for (int port : ports) {
           try {
@@ -310,9 +328,8 @@ public class FirewallManager {
       Optional<? extends SecurityGroupApi> securityGroupApi = computeServiceContext.unwrap(NovaApiMetadata.CONTEXT_TOKEN)
         .getApi()
         .getSecurityGroupExtensionForZone(clusterSpec.getTemplate().getLocationId());
-
       if (securityGroupApi.isPresent()) {
-        final String groupName = "jclouds-" + clusterSpec.getClusterName();
+        final String groupName = "whirr-" + clusterSpec.getClusterName();
         Optional<? extends SecurityGroup> group = securityGroupApi.get().list().firstMatch(new Predicate<SecurityGroup>() {
             @Override
             public boolean apply(SecurityGroup secGrp) {
@@ -341,6 +358,71 @@ public class FirewallManager {
         }
       } else {
         LOG.warn("OpenStack security group extension not available for this cloud.");
+      }
+    } else if (CloudStackApiMetadata.CONTEXT_TOKEN.isAssignableFrom(computeServiceContext.getBackendType())) {
+      CloudStackClient csClient = computeServiceContext.unwrap(CloudStackApiMetadata.CONTEXT_TOKEN).getApi();
+      BlockUntilJobCompletesAndReturnResult blockTask = computeServiceContext.utils().injector().getInstance(BlockUntilJobCompletesAndReturnResult.class);
+      ZoneIdToZoneSupplier zoneIdToZone = computeServiceContext.utils().injector().getInstance(ZoneIdToZoneSupplier.class);
+
+      Zone zone;
+      try {
+        zone = zoneIdToZone.get().get(Iterables.get(instances, 0).getNodeMetadata().getLocation().getId());
+      } catch (ExecutionException e) {
+        throw Throwables.propagate(e);
+      }
+
+      if (zone.isSecurityGroupsEnabled()) {
+        final String groupName = "whirr-" + clusterSpec.getClusterName();
+
+        org.jclouds.cloudstack.domain.SecurityGroup group
+                = Iterables.get(csClient.getSecurityGroupClient().listSecurityGroups(
+                ListSecurityGroupsOptions.Builder.named(groupName)),
+                0);
+
+        if (group != null) {
+          if (ports.length > 0) {
+            Predicate<String> jobComplete =  retry(new JobComplete(csClient), 1200, 1, 5, TimeUnit.SECONDS);
+            for (final int port : ports) {
+              if (!Iterables.any(group.getIngressRules(), new Predicate<IngressRule>() {
+                @Override
+                public boolean apply(IngressRule rule) {
+                  return rule.getStartPort() == port;
+                }
+              })) {
+                jobComplete.apply(csClient.getSecurityGroupClient().authorizeIngressPortsToCIDRs(group.getId(), "TCP", port,
+                        port, cidrs));
+              }
+            }
+          }
+
+        }
+      } else if (zone.getNetworkType().equals(NetworkType.ADVANCED)) {
+        Builder<AsyncCreateResponse> responses = ImmutableSet.builder();
+
+        try {
+          if (ports.length > 0) {
+            for (Instance instance : instances) {
+              String publicIPId = csClient.getVirtualMachineClient().getVirtualMachine(instance.getId()).getPublicIPId();
+
+              for (int port : ports) {
+                AsyncCreateResponse response = csClient.getFirewallClient()
+                        .createFirewallRuleForIpAndProtocol(publicIPId,
+                                FirewallRule.Protocol.TCP,
+                                CreateFirewallRuleOptions.Builder
+                                        .startPort(port)
+                                        .endPort(port)
+                                        .CIDRs(ImmutableSet.copyOf(cidrs)));
+                responses.add(response);
+              }
+            }
+
+            for (AsyncCreateResponse response : responses.build()) {
+              FirewallRule fwRule = blockTask.apply(response);
+            }
+          }
+        } catch (IllegalStateException e) {
+          LOG.warn(e.getMessage());
+        }
       }
     }
   }

@@ -199,8 +199,12 @@ public class ClusterSpec {
                              
     AWS_EC2_PLACEMENT_GROUP(String.class, false, "If given, use this existing EC2 placement group. (aws-ec2 specific option)"),
     
-    QUIET(Boolean.class, false,  "Adjust user level, console logging verbosity.");
+    QUIET(Boolean.class, false,  "Adjust user level, console logging verbosity."),
     
+    CLOUDSTACK_KEYPAIR(String.class, false, "If given, use this CloudStack keypair. (CloudStack specific option)"),
+
+    USE_CLOUDSTACK_SECURITY_GROUP(Boolean.class, false, "If true, create a CloudStack security group for this cluster (CloudStack specific option");
+
     private Class<?> type;
     private boolean multipleArguments;
     private String description;
@@ -320,6 +324,10 @@ public class ClusterSpec {
 
   private String awsEc2PlacementGroup;
 
+  private String cloudStackKeyPair;
+
+  private boolean useCloudStackSecurityGroup;
+
   private String autoHostnamePrefix;
 
   private String autoHostnameSuffix;
@@ -409,6 +417,11 @@ public class ClusterSpec {
 
     setAwsEc2PlacementGroup(getString(Property.AWS_EC2_PLACEMENT_GROUP));
 
+    setCloudStackKeyPair(getString(Property.CLOUDSTACK_KEYPAIR));
+
+    setUseCloudStackSecurityGroup(config.getBoolean(
+        Property.USE_CLOUDSTACK_SECURITY_GROUP.getConfigName(), Boolean.FALSE));
+
     setByonNodes(byonNodes);
     
     setQuiet(config.getBoolean(Property.QUIET.getConfigName(), Boolean.FALSE));
@@ -479,6 +492,9 @@ public class ClusterSpec {
     r.setStoreClusterInEtcHosts(isStoreClusterInEtcHosts());
 
     r.setAwsEc2PlacementGroup(getAwsEc2PlacementGroup());
+
+    r.setCloudStackKeyPair(getCloudStackKeyPair());
+    r.setUseCloudStackSecurityGroup(getUseCloudStackSecurityGroup());
 
     r.setAutoHostnamePrefix(getAutoHostnamePrefix());
     r.setAutoHostnameSuffix(getAutoHostnameSuffix());
@@ -878,12 +894,27 @@ public class ClusterSpec {
     this.storeClusterInEtcHosts = storeClusterInEtcHosts;
   }
 
+  public boolean getUseCloudStackSecurityGroup() {
+    return useCloudStackSecurityGroup;
+  }
+  public void setUseCloudStackSecurityGroup(boolean useCloudStackSecurityGroup) {
+    this.useCloudStackSecurityGroup = useCloudStackSecurityGroup;
+  }
+
   public String getAwsEc2PlacementGroup() {
     return awsEc2PlacementGroup;
   }
     
   public void setAwsEc2PlacementGroup(String awsEc2PlacementGroup) {
     this.awsEc2PlacementGroup = awsEc2PlacementGroup;
+  }
+
+  public String getCloudStackKeyPair() {
+    return cloudStackKeyPair;
+  }
+  
+  public void setCloudStackKeyPair(String cloudStackKeyPair) {
+    this.cloudStackKeyPair = cloudStackKeyPair;
   }
 
   public String getAutoHostnameSuffix() {
@@ -1088,6 +1119,8 @@ public class ClusterSpec {
         && Objects.equal(getStateStoreBlob(), that.getStateStoreBlob())
         && Objects.equal(getAwsEc2SpotPrice(), that.getAwsEc2SpotPrice())
         && Objects.equal(getAwsEc2PlacementGroup(), that.getAwsEc2PlacementGroup())
+        && Objects.equal(getCloudStackKeyPair(), that.getCloudStackKeyPair())
+        && Objects.equal(getUseCloudStackSecurityGroup(), that.getUseCloudStackSecurityGroup())
         && Objects.equal(getAutoHostnamePrefix(), that.getAutoHostnamePrefix())
         && Objects.equal(getAutoHostnameSuffix(), that.getAutoHostnameSuffix())
         && Objects.equal(getJdkInstallUrl(), that.getJdkInstallUrl())
@@ -1127,6 +1160,8 @@ public class ClusterSpec {
         getStateStoreContainer(),
         getAwsEc2SpotPrice(),
         getAwsEc2PlacementGroup(),
+        getCloudStackKeyPair(),
+        getUseCloudStackSecurityGroup(),
         getAutoHostnamePrefix(),
         getAutoHostnameSuffix(),
         getJdkInstallUrl(),
@@ -1166,6 +1201,8 @@ public class ClusterSpec {
       .add("terminateAllOnLauchFailure",isTerminateAllOnLaunchFailure())
       .add("storeClusterInEtcHosts",isStoreClusterInEtcHosts())
       .add("awsEc2PlacementGroup",getAwsEc2PlacementGroup())
+      .add("cloudStackKeyPair",getCloudStackKeyPair())
+      .add("useCloudStackSecurityGroup",getUseCloudStackSecurityGroup())
       .add("autoHostnamePrefix",getAutoHostnamePrefix())
       .add("autoHostnameSuffix",getAutoHostnameSuffix())
       .add("jdkInstallUrl", getJdkInstallUrl())
