@@ -198,6 +198,8 @@ public class ClusterSpec {
                              
     AWS_EC2_PLACEMENT_GROUP(String.class, false, "If given, use this existing EC2 placement group. (aws-ec2 specific option)"),
     
+    USE_CLOUDSTACK_SECURITY_GROUP(Boolean.class, false, "If true, create a CloudStack security group for this cluster (CloudStack specific option"),
+
     QUIET(Boolean.class, false,  "Adjust user level, console logging verbosity.");
     
     private Class<?> type;
@@ -319,6 +321,8 @@ public class ClusterSpec {
 
   private String awsEc2PlacementGroup;
 
+  private boolean useCloudStackSecurityGroup;
+
   private String autoHostnamePrefix;
 
   private String autoHostnameSuffix;
@@ -406,6 +410,9 @@ public class ClusterSpec {
 
     setAwsEc2PlacementGroup(getString(Property.AWS_EC2_PLACEMENT_GROUP));
 
+    setUseCloudStackSecurityGroup(config.getBoolean(
+        Property.USE_CLOUDSTACK_SECURITY_GROUP.getConfigName(), Boolean.FALSE));
+
     setByonNodes(byonNodes);
     
     setQuiet(config.getBoolean(Property.QUIET.getConfigName(), Boolean.FALSE));
@@ -474,6 +481,8 @@ public class ClusterSpec {
     r.setStoreClusterInEtcHosts(isStoreClusterInEtcHosts());
 
     r.setAwsEc2PlacementGroup(getAwsEc2PlacementGroup());
+
+    r.setUseCloudStackSecurityGroup(getUseCloudStackSecurityGroup());
 
     r.setAutoHostnamePrefix(getAutoHostnamePrefix());
     r.setAutoHostnameSuffix(getAutoHostnameSuffix());
@@ -867,6 +876,13 @@ public class ClusterSpec {
     this.storeClusterInEtcHosts = storeClusterInEtcHosts;
   }
 
+  public boolean getUseCloudStackSecurityGroup() {
+    return useCloudStackSecurityGroup;
+  }
+  public void setUseCloudStackSecurityGroup(boolean useCloudStackSecurityGroup) {
+    this.useCloudStackSecurityGroup = useCloudStackSecurityGroup;
+  }
+
   public String getAwsEc2PlacementGroup() {
     return awsEc2PlacementGroup;
   }
@@ -1073,6 +1089,7 @@ public class ClusterSpec {
         && Objects.equal(getStateStoreBlob(), that.getStateStoreBlob())
         && Objects.equal(getAwsEc2SpotPrice(), that.getAwsEc2SpotPrice())
         && Objects.equal(getAwsEc2PlacementGroup(), that.getAwsEc2PlacementGroup())
+        && Objects.equal(getUseCloudStackSecurityGroup(), that.getUseCloudStackSecurityGroup())
         && Objects.equal(getAutoHostnamePrefix(), that.getAutoHostnamePrefix())
         && Objects.equal(getAutoHostnameSuffix(), that.getAutoHostnameSuffix())
         && Objects.equal(getJdkInstallUrl(), that.getJdkInstallUrl())
@@ -1112,6 +1129,7 @@ public class ClusterSpec {
         getStateStoreContainer(),
         getAwsEc2SpotPrice(),
         getAwsEc2PlacementGroup(),
+        getUseCloudStackSecurityGroup(),
         getAutoHostnamePrefix(),
         getAutoHostnameSuffix(),
         getJdkInstallUrl(),
@@ -1151,6 +1169,7 @@ public class ClusterSpec {
       .add("terminateAllOnLauchFailure",isTerminateAllOnLaunchFailure())
       .add("storeClusterInEtcHosts",isStoreClusterInEtcHosts())
       .add("awsEc2PlacementGroup",getAwsEc2PlacementGroup())
+      .add("useCloudStackSecurityGroup",getUseCloudStackSecurityGroup())
       .add("autoHostnamePrefix",getAutoHostnamePrefix())
       .add("autoHostnameSuffix",getAutoHostnameSuffix())
       .add("jdkInstallUrl", getJdkInstallUrl())
