@@ -25,11 +25,24 @@ import static org.jclouds.scriptbuilder.domain.Statements.interpret;
 import static org.jclouds.scriptbuilder.domain.Statements.newStatementList;
 import static org.jclouds.scriptbuilder.statements.ssh.SshStatements.sshdConfig;
 
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+
 import org.apache.whirr.ClusterSpec;
 import org.apache.whirr.InstanceTemplate;
 import org.apache.whirr.service.jclouds.StatementBuilder;
 import org.jclouds.aws.ec2.AWSEC2ApiMetadata;
 import org.jclouds.aws.ec2.compute.AWSEC2TemplateOptions;
+import org.jclouds.cloudstack.CloudStackApiMetadata;
+import org.jclouds.cloudstack.CloudStackClient;
+import org.jclouds.cloudstack.compute.options.CloudStackTemplateOptions;
+import org.jclouds.cloudstack.domain.NetworkType;
+import org.jclouds.cloudstack.domain.SecurityGroup;
+import org.jclouds.cloudstack.domain.Zone;
+import org.jclouds.cloudstack.options.ListSecurityGroupsOptions;
+import org.jclouds.cloudstack.predicates.JobComplete;
+import org.jclouds.cloudstack.strategy.BlockUntilJobCompletesAndReturnResult;
+import org.jclouds.cloudstack.suppliers.ZoneIdToZoneSupplier;
 import org.jclouds.ec2.EC2ApiMetadata;
 import org.jclouds.ec2.compute.options.EC2TemplateOptions;
 import org.jclouds.ec2.compute.predicates.EC2ImagePredicates;
@@ -37,15 +50,19 @@ import org.jclouds.compute.ComputeService;
 import org.jclouds.compute.ComputeServiceContext;
 import org.jclouds.compute.domain.Template;
 import org.jclouds.compute.domain.TemplateBuilder;
+import org.jclouds.predicates.RetryablePredicate;
 import org.jclouds.scriptbuilder.domain.OsFamily;
 import org.jclouds.scriptbuilder.domain.Statement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.common.base.Joiner;
+import com.google.common.base.Predicate;
 import com.google.common.base.Splitter;
+import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
 
 public class BootstrapTemplate {
 
@@ -135,8 +152,49 @@ public class BootstrapTemplate {
             }
         }
 
-        return template;
+        return setCloudStackSecurityGroup(context, spec, template, instanceTemplate);
     }
+
+  /**
+   * Set the CloudStack security group, if desired - if it doesn't already exist, create it.
+   */
+  private static Template setCloudStackSecurityGroup(ComputeServiceContext context, ClusterSpec spec,
+                                                     Template template, InstanceTemplate instanceTemplate) {
+    if (CloudStackApiMetadata.CONTEXT_TOKEN.isAssignableFrom(context.getBackendType())
+        && spec.getUseCloudStackSecurityGroup()) {
+      CloudStackClient csClient = context.unwrap(CloudStackApiMetadata.CONTEXT_TOKEN).getApi();
+      BlockUntilJobCompletesAndReturnResult blockTask = context.utils().injector().getInstance(BlockUntilJobCompletesAndReturnResult.class);
+      ZoneIdToZoneSupplier zoneIdToZone = context.utils().injector().getInstance(ZoneIdToZoneSupplier.class);
+
+      final String zoneId = template.getLocation().getId();
+      Zone zone = null;
+      try {
+         zone = zoneIdToZone.get().get(zoneId);
+      } catch (ExecutionException e) {
+         throw Throwables.propagate(e);
+      }
+
+      if (zone.getNetworkType().equals(NetworkType.BASIC)) {
+        SecurityGroup group = Iterables.get(csClient.getSecurityGroupClient().listSecurityGroups(
+                                                                                                 ListSecurityGroupsOptions.Builder.named("jclouds-" + spec.getClusterName())),
+                                            0);
+        
+        if (group == null) {
+          group = csClient.getSecurityGroupClient().createSecurityGroup("jclouds-" + spec.getClusterName());
+        }
+        
+        if (group != null) {
+          Predicate<String> jobComplete =  new RetryablePredicate<String>(new JobComplete(csClient), 1200, 1, 5, TimeUnit.SECONDS);
+          jobComplete.apply(csClient.getSecurityGroupClient().authorizeIngressPortsToCIDRs(group.getId(), "TCP", 22,
+                                                                                           22, spec.getClientCidrs()));
+
+          template.getOptions().as(CloudStackTemplateOptions.class).securityGroupId(group.getId());
+        }
+      }
+    }
+    
+    return template;
+  }
 
   // must be used inside InitBuilder, as this sets the shell variables used in this statement
   private static Statement ensureUserExistsWithPublicAndPrivateKey(String username,
