@@ -38,6 +38,7 @@ import org.jclouds.cloudstack.CloudStackApiMetadata;
 import org.jclouds.cloudstack.CloudStackClient;
 import org.jclouds.cloudstack.domain.AsyncCreateResponse;
 import org.jclouds.cloudstack.domain.FirewallRule;
+import org.jclouds.cloudstack.domain.IngressRule;
 import org.jclouds.cloudstack.domain.NetworkType;
 import org.jclouds.cloudstack.domain.Zone;
 import org.jclouds.cloudstack.options.CreateFirewallRuleOptions;
@@ -403,9 +404,16 @@ public class FirewallManager {
         if (group != null) {
           if (ports.length > 0) {
             Predicate<String> jobComplete =  new RetryablePredicate<String>(new JobComplete(csClient), 1200, 1, 5, TimeUnit.SECONDS);
-            for (int port : ports) {
-              jobComplete.apply(csClient.getSecurityGroupClient().authorizeIngressPortsToCIDRs(group.getId(), "TCP", port,
-                                                                                               port, cidrs));
+            for (final int port : ports) {
+              if (!Iterables.any(group.getIngressRules(), new Predicate<IngressRule>() {
+                    @Override
+                    public boolean apply(IngressRule rule) {
+                      return rule.getStartPort() == port;
+                    }
+                  })) {
+                jobComplete.apply(csClient.getSecurityGroupClient().authorizeIngressPortsToCIDRs(group.getId(), "TCP", port,
+                                                                                                 port, cidrs));
+              }
             }
           } 
           
