@@ -52,6 +52,7 @@ import org.jclouds.compute.ComputeService;
 import org.jclouds.compute.ComputeServiceContext;
 import org.jclouds.compute.domain.Template;
 import org.jclouds.compute.domain.TemplateBuilder;
+import org.jclouds.domain.LoginCredentials;
 import org.jclouds.predicates.RetryablePredicate;
 import org.jclouds.scriptbuilder.domain.OsFamily;
 import org.jclouds.scriptbuilder.domain.Statement;
@@ -154,9 +155,27 @@ public class BootstrapTemplate {
             }
         }
 
-        return setCloudStackSecurityGroup(context, spec, template, instanceTemplate);
+        return setCloudStackKeyPair(context, spec, template, instanceTemplate);
     }
 
+  /**
+   * Set the CloudStack keypair, if desired. Use the private key and public key provided in the spec.
+   */
+  private static Template setCloudStackKeyPair(ComputeServiceContext context, ClusterSpec spec,
+                                               Template template, InstanceTemplate instanceTemplate) {
+    if (CloudStackApiMetadata.CONTEXT_TOKEN.isAssignableFrom(context.getBackendType())) {
+      if (spec.getCloudStackKeyPair() != null) {
+        LoginCredentials credentials = LoginCredentials.builder()
+          .user(spec.getTemplate().getLoginUser()).privateKey(spec.getPrivateKey()).build();
+        context.utils().getCredentialStore().put("keypair#" + spec.getCloudStackKeyPair(), credentials);
+        template.getOptions().overrideLoginCredentials(credentials);
+        template.getOptions().as(CloudStackTemplateOptions.class).keyPair(spec.getCloudStackKeyPair());
+      }
+    }
+    
+    return setCloudStackSecurityGroup(context, spec, template, instanceTemplate);
+  }
+  
   /**
    * Set the CloudStack security group, if desired - if it doesn't already exist, create it.
    */
