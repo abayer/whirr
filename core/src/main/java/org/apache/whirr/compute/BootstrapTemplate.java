@@ -25,6 +25,7 @@ import static org.jclouds.scriptbuilder.domain.Statements.interpret;
 import static org.jclouds.scriptbuilder.domain.Statements.newStatementList;
 import static org.jclouds.scriptbuilder.statements.ssh.SshStatements.sshdConfig;
 
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
@@ -36,6 +37,7 @@ import org.jclouds.aws.ec2.compute.AWSEC2TemplateOptions;
 import org.jclouds.cloudstack.CloudStackApiMetadata;
 import org.jclouds.cloudstack.CloudStackClient;
 import org.jclouds.cloudstack.compute.options.CloudStackTemplateOptions;
+import org.jclouds.cloudstack.domain.IngressRule;
 import org.jclouds.cloudstack.domain.NetworkType;
 import org.jclouds.cloudstack.domain.SecurityGroup;
 import org.jclouds.cloudstack.domain.Zone;
@@ -162,6 +164,7 @@ public class BootstrapTemplate {
                                                      Template template, InstanceTemplate instanceTemplate) {
     if (CloudStackApiMetadata.CONTEXT_TOKEN.isAssignableFrom(context.getBackendType())
         && spec.getUseCloudStackSecurityGroup()) {
+      
       CloudStackClient csClient = context.unwrap(CloudStackApiMetadata.CONTEXT_TOKEN).getApi();
       BlockUntilJobCompletesAndReturnResult blockTask = context.utils().injector().getInstance(BlockUntilJobCompletesAndReturnResult.class);
       ZoneIdToZoneSupplier zoneIdToZone = context.utils().injector().getInstance(ZoneIdToZoneSupplier.class);
@@ -175,24 +178,36 @@ public class BootstrapTemplate {
       }
 
       if (zone.getNetworkType().equals(NetworkType.BASIC)) {
-        SecurityGroup group = Iterables.get(csClient.getSecurityGroupClient().listSecurityGroups(
-                                                                                                 ListSecurityGroupsOptions.Builder.named("jclouds-" + spec.getClusterName())),
-                                            0);
-        
-        if (group == null) {
+      
+        Set<SecurityGroup> groups = csClient.getSecurityGroupClient().listSecurityGroups(
+                                                                                         ListSecurityGroupsOptions.Builder.named("jclouds-" + spec.getClusterName()));
+
+        SecurityGroup group = null;
+        if (groups.isEmpty()) {
+          LOG.warn("Creating security group");
           group = csClient.getSecurityGroupClient().createSecurityGroup("jclouds-" + spec.getClusterName());
+        } else {
+          LOG.warn("Using existing security group");
+          group = Iterables.get(groups, 0);
         }
         
         if (group != null) {
-          Predicate<String> jobComplete =  new RetryablePredicate<String>(new JobComplete(csClient), 1200, 1, 5, TimeUnit.SECONDS);
-          jobComplete.apply(csClient.getSecurityGroupClient().authorizeIngressPortsToCIDRs(group.getId(), "TCP", 22,
-                                                                                           22, spec.getClientCidrs()));
-
+          if (!Iterables.any(group.getIngressRules(), new Predicate<IngressRule>() {
+                @Override
+                public boolean apply(IngressRule rule) {
+                  return rule.getStartPort() == 22;
+                }
+              })) {
+            Predicate<String> jobComplete =  new RetryablePredicate<String>(new JobComplete(csClient), 1200, 1, 5, TimeUnit.SECONDS);
+            jobComplete.apply(csClient.getSecurityGroupClient().authorizeIngressPortsToCIDRs(group.getId(), "TCP", 22,
+                                                                                             22, spec.getClientCidrs()));
+          }
           template.getOptions().as(CloudStackTemplateOptions.class).securityGroupId(group.getId());
+          template.getOptions().as(CloudStackTemplateOptions.class).setupStaticNat(false);
         }
       }
     }
-    
+
     return template;
   }
 
