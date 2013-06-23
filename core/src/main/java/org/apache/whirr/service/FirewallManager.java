@@ -19,6 +19,7 @@
 package org.apache.whirr.service;
 
 import static org.jclouds.scriptbuilder.domain.Statements.exec;
+import static org.jclouds.util.Predicates2.retry;
 
 import java.io.IOException;
 import java.net.HttpURLConnection;
@@ -55,7 +56,6 @@ import org.jclouds.openstack.nova.v2_0.domain.Ingress;
 import org.jclouds.openstack.nova.v2_0.domain.SecurityGroup;
 import org.jclouds.openstack.nova.v2_0.extensions.SecurityGroupApi;
 import org.jclouds.javax.annotation.Nullable;
-import org.jclouds.predicates.RetryablePredicate;
 import org.jclouds.scriptbuilder.domain.Statement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -403,7 +403,7 @@ public class FirewallManager {
 
         if (group != null) {
           if (ports.length > 0) {
-            Predicate<String> jobComplete =  new RetryablePredicate<String>(new JobComplete(csClient), 1200, 1, 5, TimeUnit.SECONDS);
+            Predicate<String> jobComplete =  retry(new JobComplete(csClient), 1200, 1, 5, TimeUnit.SECONDS);
             for (final int port : ports) {
               if (!Iterables.any(group.getIngressRules(), new Predicate<IngressRule>() {
                     @Override

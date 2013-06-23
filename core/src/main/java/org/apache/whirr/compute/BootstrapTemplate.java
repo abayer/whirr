@@ -24,6 +24,7 @@ import static org.jclouds.scriptbuilder.domain.Statements.createOrOverwriteFile;
 import static org.jclouds.scriptbuilder.domain.Statements.interpret;
 import static org.jclouds.scriptbuilder.domain.Statements.newStatementList;
 import static org.jclouds.scriptbuilder.statements.ssh.SshStatements.sshdConfig;
+import static org.jclouds.util.Predicates2.retry;
 
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
@@ -53,7 +54,6 @@ import org.jclouds.compute.ComputeServiceContext;
 import org.jclouds.compute.domain.Template;
 import org.jclouds.compute.domain.TemplateBuilder;
 import org.jclouds.domain.LoginCredentials;
-import org.jclouds.predicates.RetryablePredicate;
 import org.jclouds.scriptbuilder.domain.OsFamily;
 import org.jclouds.scriptbuilder.domain.Statement;
 import org.slf4j.Logger;
@@ -217,7 +217,7 @@ public class BootstrapTemplate {
                   return rule.getStartPort() == 22;
                 }
               })) {
-            Predicate<String> jobComplete =  new RetryablePredicate<String>(new JobComplete(csClient), 1200, 1, 5, TimeUnit.SECONDS);
+            Predicate<String> jobComplete =  retry(new JobComplete(csClient), 1200, 1, 5, TimeUnit.SECONDS);
             jobComplete.apply(csClient.getSecurityGroupClient().authorizeIngressPortsToCIDRs(group.getId(), "TCP", 22,
                                                                                              22, spec.getClientCidrs()));
           }
