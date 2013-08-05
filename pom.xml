@@ -141,6 +141,11 @@
         <version>${jclouds.version}</version>
       </dependency>
       <dependency>
+        <groupId>org.apache.jclouds.labs</groupId>
+        <artifactId>google-compute-engine</artifactId>
+        <version>${jclouds.version}</version>
+      </dependency>
+      <dependency>
         <groupId>org.codehaus.jackson</groupId>
         <artifactId>jackson-core-asl</artifactId>
         <version>${jackson.version}</version>

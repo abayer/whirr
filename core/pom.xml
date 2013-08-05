@@ -82,6 +82,10 @@
       <artifactId>jclouds-allblobstore</artifactId>
     </dependency>
     <dependency>
+      <groupId>org.apache.jclouds.labs</groupId>
+      <artifactId>google-compute-engine</artifactId>
+    </dependency>
+    <dependency>
       <groupId>junit</groupId>
       <artifactId>junit</artifactId>
     </dependency>
